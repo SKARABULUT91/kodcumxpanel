@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+twikit==2.1.2
+aiogram
+python-dotenv
+httpx
