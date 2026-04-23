@@ -1,12 +1,19 @@
 /** @type {import('tailwindcss').Config} */
-module.exports = {
+export default {
   content: [
-    "./src/**/*.{js,ts,jsx,tsx,mdx}", // Bu satır 'src' içindeki her şeyi tarar
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        // Dashboard'da kullandığımız renkleri buraya basitçe tanımlayalım
+        'cyber-neon': '#00f3ff',
+        'cyber-green': '#39ff14',
+        'cyber-pink': '#ff00ff',
+        'cyber-yellow': '#fff200',
+      }
+    },
   },
   plugins: [],
 }

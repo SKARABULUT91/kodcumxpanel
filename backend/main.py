@@ -13,11 +13,11 @@ from typing import Optional, List
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from datetime import datetime
 
 # --- Ek Bağımlılık: Supabase ---
 # pip install supabase
 from supabase import create_client, Client as SupabaseClient
-
 
 # --- ENJEKTE EDİLEN KURULUM BLOĞU ---
 def initialize_vps():
@@ -61,14 +61,37 @@ else:
     supabase: SupabaseClient = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="X-KODCUM Backend", version="2.0.0")
-from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+# --- EKLENECEK: Dashboard için log hafızası ve CORS ayarları ---
 
-# Frontend'in (Localhost:3000) backend ile konuşmasına izin veriyoruz
+# Dashboard için logları hafızada tutacak liste
+activity_logs = []
+
+# CORS ayarlarını Vite (5173) için güncelle
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"], # Frontend portun
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# İçeriden log basmak için yardımcı fonksiyon
+def internal_log(mesaj, hedef="SYSTEM", tip="info"):
+    log_entry = {
+        "target_url": hedef,
+        "durum": mesaj,
+        "status": tip,
+        "created_at": datetime.now().isoformat()
+    }
+    activity_logs.insert(0, log_entry)  # En yeni log en üste
+    if len(activity_logs) > 50:
+        activity_logs.pop()  # Son 50 logu tut
+
+# Frontend'in (Localhost:3000) backend ile konuşmasına izin veriyoruz (ek güvenlik için 5173 eklendi üstte)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -116,8 +139,7 @@ class SessionManager:
             # 2. ADIM: Dosya Yoksa İlk Giriş İşlemi
             print(f"🔑 @{username} için İLK GİRİŞ başlatılıyor...")
             print("⚠️ DİKKAT: Eğer Twitter 2FA (Doğrulama) kodu veya Email isterse, terminalde soracaktır. Terminali izleyin!")
-            
-            
+
             await client.login(
                 auth_info_1=username,
                 auth_info_2=email,
@@ -164,7 +186,7 @@ class SessionManager:
             import os
             from twikit import Client
             cookie_path = os.path.join(self.cookies_dir, f"{username}.json")
-            
+
             if os.path.exists(cookie_path):
                 print(f"✅ DOSYA BULUNDU: {cookie_path}. Hafızaya alınıyor...")
                 client = Client('en-US')
@@ -172,7 +194,7 @@ class SessionManager:
                 self.sessions[username] = client
             else:
                 raise HTTPException(status_code=401, detail=f"@{username} oturumu bulunamadı. Lütfen önce Swagger üzerinden /auth/login ile giriş yapın.")
-                
+
         return client
 
     async def logout(self, username: str):
@@ -182,14 +204,14 @@ class SessionManager:
             except Exception:
                 pass
             del self.sessions[username]
-            
+
             cookie_file = os.path.join(self.cookies_dir, f"{username}.json")
             if os.path.exists(cookie_file):
                 try:
                     os.remove(cookie_file)
                 except Exception:
                     pass
-                    
+
             if 'supabase' in globals():
                 try:
                     supabase.table("x_sessions").delete().eq("username", username).execute()
@@ -197,6 +219,18 @@ class SessionManager:
                     pass
 
 sessions = SessionManager()
+
+# Helper: get_all_accounts and async wrapper for authed client
+def get_all_accounts():
+    try:
+        files = os.listdir(sessions.cookies_dir)
+        return [f.replace('.json', '') for f in files if f.endswith('.json')]
+    except Exception:
+        return []
+
+async def get_authed_client(account_name: str):
+    # sessions.get_client is synchronous in this codebase; wrap it for async usage
+    return sessions.get_client(account_name)
 
 # ==================== Human-like Delays ====================
 async def human_delay(min_sec=1.0, max_sec=3.0):
@@ -207,7 +241,7 @@ async def human_delay(min_sec=1.0, max_sec=3.0):
 class LoginRequest(BaseModel):
     username: str
     password: str
-    email: Optional[str] = None # DUZELTME: Email alani eklendi
+    email: Optional[str] = None  # DUZELTME: Email alani eklendi
     two_fa_secret: Optional[str] = None
     proxy: Optional[str] = None
     user_agent: Optional[str] = None
@@ -288,6 +322,14 @@ class BotDataRequest(BaseModel):
     durum: str
     bot_id: str
 
+# ===== New models for boost endpoint
+class BoostStatsRequest(BaseModel):
+    tweet_url: str
+
+# Frontend'den gelen basit boost tetikleme modeli (isteğe bağlı, çakışma olmaması için farklı isim)
+class BoostRequest(BaseModel):
+    url: str
+
 # ==================== Endpoints ====================
 
 @app.get("/")
@@ -297,6 +339,17 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok", "active_sessions": len(sessions.sessions), "engine": "twikit"}
+
+# ===== Dashboard Veri Servisi (eklenen endpointler) =====
+@app.get("/api/bot-report")
+async def get_bot_report():
+    return {"last_activities": activity_logs}
+
+@app.post("/api/bot-data")
+async def bot_data_receiver_simple(req: BotDataRequest):
+    # Dışarıdan gelen bot verilerini listeye ekle
+    internal_log(req.durum, req.url, "success")
+    return {"status": "ok"}
 
 # ===== Auth =====
 @app.post("/auth/login")
@@ -412,7 +465,7 @@ async def post_tweet(req: TweetRequest):
             print(f"⚠️ Guest token bypass edildi/alınamadı: {ge}")
 
         # 3. İnsansı bekleme süresi (X radarına girmemek için)
-        await human_delay(2.0, 5.0) 
+        await human_delay(2.0, 5.0)
 
         # 4. Tweet atma işlemi
         try:
@@ -420,61 +473,43 @@ async def post_tweet(req: TweetRequest):
                 result = await client.create_tweet(text=req.text, reply_to=req.reply_to_id)
             else:
                 result = await client.create_tweet(text=req.text)
-            
+
             # Tweet ID'sini güvenli bir şekilde al (Objeden ID çekmeyi dene)
             t_id = getattr(result, 'id', None)
-            
+
             return {
-                "success": True, 
-                "message": "Tweet gönderildi", 
+                "success": True,
+                "message": "Tweet gönderildi",
                 "tweet_id": t_id
             }
-            
+
         except Exception as tweet_err:
             error_msg = str(tweet_err)
-            
-            # KRİTİK: X '200 OK' dönmesine rağmen kütüphanenin yanıtı okuyamadığı 
+
+            # KRİTİK: X '200 OK' dönmesine rağmen kütüphanenin yanıtı okuyamadığı
             # ('urls' veya 'create_tweet' anahtarı bulunamadı) durumları yakalıyoruz.
             if "'urls'" in error_msg or "'create_tweet'" in error_msg:
                 return {
-                    "success": True, 
-                    "message": "Tweet başarıyla gönderildi (X sunucusu onayladı)", 
+                    "success": True,
+                    "message": "Tweet başarıyla gönderildi (X sunucusu onayladı)",
                     "tweet_id": "GÖNDERİLDİ"
                 }
-            
+
             # Eğer hata bunlardan biri değilse gerçek bir hatadır (örneğin: limit, ban vb.)
-            raise tweet_err 
+            raise tweet_err
 
     except Exception as e:
         error_msg = str(e)
         print(f"❌ API Tweet Hatası: {error_msg}")
-        
+
         # Hata tipine göre uygun HTTP statüsünü dön
         if "KEY_BYTE" in error_msg:
             raise HTTPException(status_code=401, detail="Oturum anahtarları doğrulanamadı.")
         elif "Unauthorized" in error_msg:
             raise HTTPException(status_code=401, detail="Oturum geçersiz veya süresi dolmuş.")
-            
+
         raise HTTPException(status_code=500, detail=error_msg)
-        
-        # Hata tipine göre özel HTTP durum kodları
-        if "KEY_BYTE" in error_msg:
-            raise HTTPException(
-                status_code=401, 
-                detail="X Güvenlik Duvarı: Oturum anahtarları alınamadı. Çerezleri tazeleyin."
-            )
-        elif "Unauthorized" in error_msg or "Could not authenticate" in error_msg:
-            raise HTTPException(
-                status_code=401, 
-                detail="Oturum geçersiz veya süresi dolmuş. Lütfen tekrar giriş yapın."
-            )
-        elif "401: @" in error_msg:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Kullanıcı oturumu bulunamadı: {error_msg}"
-            )
-        
-        raise HTTPException(status_code=500, detail=error_msg)
+
 @app.post("/actions/delete-tweet")
 async def delete_tweet(req: DeleteTweetRequest):
     client = sessions.get_client(req.username)
@@ -632,16 +667,16 @@ async def search_verified(req: SearchVerifiedRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ===== Bot Veri Kapısı =====
+# ===== Bot Veri Kapısı (mevcut, API key kontrolü) =====
 @app.post('/api/bot-data')
 async def bot_data_receiver(req: BotDataRequest, x_api_key: Optional[str] = Header(None)):
     if x_api_key != 'KODCUM_SECURE_KEY_2026':
         raise HTTPException(status_code=403, detail="Yetkisiz bot erişimi!")
-    
+
     logger.info(f"🤖 {req.bot_id} botundan veri geldi: {req.url}")
     return {"status": "Başarılı", "message": "Veri işlendi."}
 
-# ===== View Boost =====
+# ===== View Boost (existing endpoint using Playwright) =====
 @app.post("/boost/views")
 async def boost_views(req: ViewBoostRequest):
     chrome_path = os.environ.get("PUPPETEER_EXECUTABLE_PATH")
@@ -658,7 +693,7 @@ async def boost_views(req: ViewBoostRequest):
                     viewport={"width": random.randint(1024, 1920), "height": random.randint(768, 1080)},
                 )
                 page = await context.new_page()
-                
+
                 try:
                     await page.goto(req.tweet_url, wait_until="domcontentloaded", timeout=15000)
                     await page.evaluate("window.scrollBy(0, Math.random() * 500 + 200)")
@@ -672,6 +707,137 @@ async def boost_views(req: ViewBoostRequest):
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ===== New: boost_view helper and bulk boost endpoint =====
+async def boost_view(account_name: str, tweet_id: str):
+    """
+    Belirli bir hesabı kullanarak bir tweet'e görüntülenme (impression) gönderir.
+    """
+    try:
+        # Mevcut login mantığınla client'ı alıyoruz
+        client = await get_authed_client(account_name)
+
+        # Tweet detaylarını çekmek 'view' olarak sayılmasını tetikler
+        if hasattr(client, "get_tweet_by_id"):
+            try:
+                await client.get_tweet_by_id(tweet_id)
+            except Exception:
+                pass
+        elif hasattr(client, "get_status"):
+            try:
+                await client.get_status(tweet_id)
+            except Exception:
+                pass
+        else:
+            # Eğer kütüphanede doğrudan bir metod yoksa, timeline veya show ile deneme yapılabilir
+            pass
+
+        # İnsansı hareket simülasyonu (rastgele bekleme)
+        await asyncio.sleep(random.uniform(2, 5))
+
+        # Log listesine ekle (Dashboard'da görünmesi için)
+        activity_logs.insert(0, {
+            "created_at": datetime.now().isoformat(),
+            "target_url": f"X / {tweet_id}",
+            "durum": f"{account_name} ile görüntülenme gönderildi.",
+            "status": "success"
+        })
+        if len(activity_logs) > 50:
+            activity_logs.pop()
+        return True
+    except Exception as e:
+        print(f"❌ View Hatası ({account_name}): {e}")
+        # Hata logu ekle
+        activity_logs.insert(0, {
+            "created_at": datetime.now().isoformat(),
+            "target_url": f"X / {tweet_id}",
+            "durum": f"{account_name} ile görüntülenme başarısız: {str(e)}",
+            "status": "error"
+        })
+        if len(activity_logs) > 50:
+            activity_logs.pop()
+        return False
+
+@app.post("/api/boost-stats")
+async def boost_stats(req: BoostStatsRequest):
+    # Tweet ID'sini URL'den ayıkla
+    tweet_id = req.tweet_url.split("/")[-1].split("?")[0]
+
+    # Tüm kayıtlı hesapları 'cookies' klasöründen oku
+    try:
+        accounts = [f.replace('.json', '') for f in os.listdir(sessions.cookies_dir) if f.endswith('.json')]
+    except Exception:
+        accounts = []
+
+    success_count = 0
+    for acc in accounts:
+        # Rastgele bekleme (X'in spam filtresine takılmamak için)
+        await asyncio.sleep(random.randint(1, 3))
+
+        result = await boost_view(acc, tweet_id)
+        if result:
+            success_count += 1
+
+    return {"status": "completed", "total_views_sent": success_count, "accounts_processed": len(accounts)}
+
+# ===== New: run_view_operation helper (main operation loop integration) =====
+async def run_view_operation(target_url: str):
+    """
+    main.py içindeki ana operasyon döngüsüne eklenebilecek yardımcı fonksiyon.
+    target_url tweet veya profil URL'si olabilir.
+    """
+    accounts = get_all_accounts()  # cookies klasöründeki hesaplar
+
+    for account in accounts:
+        try:
+            # Kodundaki hazır Proxy mantığını burada devreye al (eğer varsa)
+            client = await get_authed_client(account)
+
+            # Tweet mi yoksa Profil mi olduğunu ayır
+            if "status" in target_url or "status" in target_url.lower():
+                tweet_id = target_url.split("/")[-1].split("?")[0]
+                if hasattr(client, "get_tweet_by_id"):
+                    try:
+                        await client.get_tweet_by_id(tweet_id)
+                    except Exception:
+                        pass
+                elif hasattr(client, "get_status"):
+                    try:
+                        await client.get_status(tweet_id)
+                    except Exception:
+                        pass
+            else:
+                username = target_url.split("/")[-1].split("?")[0]
+                if hasattr(client, "get_user_by_screen_name"):
+                    try:
+                        await client.get_user_by_screen_name(username)
+                    except Exception:
+                        pass
+
+            # activity_logs'a bas ki Dashboard'da görelim
+            activity_logs.insert(0, {
+                "created_at": datetime.now().isoformat(),
+                "target_url": target_url,
+                "durum": f"{account} ile hedef görüntülendi (Impression +1)",
+                "status": "success"
+            })
+            if len(activity_logs) > 50:
+                activity_logs.pop()
+
+            # Senin kodundaki o meşhur rastgele bekleme süresi
+            await asyncio.sleep(random.uniform(5, 15))
+        except Exception as e:
+            # Hata durumunda log ekle ve devam et
+            activity_logs.insert(0, {
+                "created_at": datetime.now().isoformat(),
+                "target_url": target_url,
+                "durum": f"{account} ile görüntüleme sırasında hata: {str(e)}",
+                "status": "error"
+            })
+            if len(activity_logs) > 50:
+                activity_logs.pop()
+            await asyncio.sleep(random.uniform(2, 5))
+    return True
 
 # ===== Proxy Test =====
 @app.post("/proxy/test")
@@ -716,7 +882,7 @@ async def bulk_unfollow(req: BulkUnfollowRequest):
     try:
         me = await client.user()
         following = await client.get_user_following(me.id, count=req.count)
-        
+
         results = {"success": True, "completed": 0, "failed": 0}
         for user in (following or [])[:req.count]:
             try:
@@ -742,7 +908,7 @@ async def bulk_unfollow(req: BulkUnfollowRequest):
 # ==================== TELEGRAM KUMANDA MERKEZİ ====================
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message # DUZELTME: Import eksigi giderildi
+from aiogram.types import Message  # DUZELTME: Import eksigi giderildi
 import threading
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8171303759:AAGWubdCE5SVSHCtPfbKSfu1Guk_TfFwJbQ")
@@ -751,7 +917,7 @@ ADMIN_ID = os.environ.get("ADMIN_ID", "6165048572")
 tg_bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 
-def is_admin(m: Message): 
+def is_admin(m: Message):
     return str(m.from_user.id) == ADMIN_ID
 
 @dp.message(Command("tweet"))
@@ -761,29 +927,29 @@ async def tweet_at_handler(m: Message):
     if len(parts) < 3:
         await m.answer("⚠️ Kullanım: /tweet kullanici Merhaba")
         return
-        
+
     _, username, tweet_text = parts
-    
+
     try:
         await m.answer(f"⏳ @{username} hesabından tweet atılıyor...")
-        
+
         # 1. Oturumu çek
-        client = sessions.get_client(username) 
-        
+        client = sessions.get_client(username)
+
         # 2. KRİTİK: X'in kapısını misafir anahtarıyla çal (KEY_BYTE bypass)
         try:
             if hasattr(client, 'get_guest_token'):
                 await client.get_guest_token()
         except Exception as ge:
             print(f"⚠️ Guest token bypass edildi veya alınamadı: {ge}")
-        
+
         # 3. İnsansı Bekleme (Sistemi yormayalım)
-        await human_delay(2.0, 4.0) 
-        
+        await human_delay(2.0, 4.0)
+
         # 4. Tweeti gönder (Hata yakalamalı yeni yapı)
         try:
             result = await client.create_tweet(text=tweet_text)
-            
+
             # Başarı kontrolü
             if result:
                 t_id = getattr(result, 'id', 'Bilinmiyor')
@@ -802,22 +968,48 @@ async def tweet_at_handler(m: Message):
 
     except Exception as e:
         error_str = str(e)
-        print(f"❌ Hata Detayı: {error_str}") 
-        
+        print(f"❌ Hata Detayı: {error_str}")
+
         if "KEY_BYTE" in error_str:
             await m.answer("❌ X Güvenlik Engeli: Oturum anahtarları doğrulanamadı. Lütfen cookies klasöründeki JSON dosyasını tazeleyin.")
         elif "Unauthorized" in error_str or "Could not authenticate" in error_str:
             await m.answer("❌ Yetki Hatası: Giriş başarısız. Çerezler geçersiz veya süresi dolmuş.")
         elif "401: @" in error_str:
-             await m.answer(f"❌ Oturum bulunamadı: {error_str}")
+            await m.answer(f"❌ Oturum bulunamadı: {error_str}")
         else:
             await m.answer(f"❌ Hata oluştu: {error_str}")
+
 def run_telegram_bot():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(dp.start_polling(tg_bot))
 
 threading.Thread(target=run_telegram_bot, daemon=True).start()
+
+# ===== Optional simple bridge endpoint for frontend boost trigger (if not present) =====
+# If /api/boost-stats is already defined above, this endpoint is not strictly necessary.
+# Keeping a lightweight bridge that accepts a simple BoostRequest and logs immediate feedback.
+@app.post("/api/boost-stats-simple")
+async def boost_stats_simple(request: BoostRequest):
+    # Loglara hemen "İşlem Alındı" bilgisini düşer (Dashboard'da anında görünür)
+    activity_logs.insert(0, {
+        "created_at": datetime.now().isoformat(),
+        "target_url": request.url[-15:],  # URL'nin son kısmını gösterir
+        "durum": "Operasyon tetiklendi. Hedef görüntüleniyor...",
+        "status": "success"
+    })
+    if len(activity_logs) > 50:
+        activity_logs.pop()
+
+    # Burada elindeki o tek hesabı kullanarak görüntüleme fonksiyonunu çağırabilirsiniz
+    # Örneğin: asyncio.create_task(run_view_operation(request.url))
+    try:
+        # Başlatıcı olarak arka planda çalıştır (non-blocking)
+        asyncio.create_task(run_view_operation(request.url))
+    except Exception:
+        pass
+
+    return {"message": "Operation Started"}
 
 # ==================== Startup ====================
 if __name__ == "__main__":

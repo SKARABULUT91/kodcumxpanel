@@ -1,13 +1,14 @@
 <!doctype html>
-<html lang="tr">
+<html lang="tr" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline';">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     
-    <title>SNR ENGINE | Automation Dashboard</title>
-    <meta name="description" content="SNR ENGINE v2 - Advanced Web Automation & Stealth Operations">
+    <title>SNR ENGINE | Control Center</title>
+    <meta name="description" content="SNR ENGINE v2 - Advanced Web Automation Control Center">
     <meta name="author" content="KODCUM" />
 
     <meta property="og:type" content="website" />
@@ -15,14 +16,25 @@
     <meta property="og:description" content="Stealth mod aktif. Sistemler hazır.">
     <meta property="og:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/6822fa04-1de7-475e-bf09-f3161ba167b5/id-preview-ce6e1355--a59031d5-8ab4-42c5-b2b4-289d9c3042d0.lovable.app-1775401119110.png">
 
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Kodcum" />
-    <meta name="twitter:title" content="SNR ENGINE | Control Center">
-    <meta name="twitter:image" content="https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/6822fa04-1de7-475e-bf09-f3161ba167b5/id-preview-ce6e1355--a59031d5-8ab4-42c5-b2b4-289d9c3042d0.lovable.app-1775401119110.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+      /* İlk yüklemede göz almaması için siyah arka plan */
+      body { 
+        background-color: #050505; 
+        margin: 0; 
+        padding: 0; 
+        overflow-x: hidden;
+      }
+      #root { min-height: 100vh; }
+    </style>
   </head>
 
-  <body>
+  <body class="bg-[#050505] text-zinc-50 antialiased selection:bg-cyan-400 selection:text-black">
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
