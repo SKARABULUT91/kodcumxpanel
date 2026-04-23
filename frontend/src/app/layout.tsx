@@ -1,24 +1,24 @@
-import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'Kodcum v2 | Dashboard',
-  description: 'SNR ENGINE v2 - Profesyonel Otomasyon Paneli',
-}
+  title: "SNR ENGINE V2 | KODCUM AJANS",
+  description: "Advanced X Automation & Stealth Engine",
+};
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
-    <html lang="tr">
-      <head>
-        {/* Favicon veya ek meta tagleri buraya gelebilir */}
-      </head>
-      <body className="bg-[#050505] antialiased">
+    <html lang="tr" className="dark">
+      <body className={`${inter.className} bg-[#050505] text-[#ededed] antialiased`}>
         {children}
       </body>
     </html>
-  )
+  );
 }
